@@ -27,7 +27,7 @@ pip install pandas matplotlib seaborn scikit-learn openpyxl
 1. **Clone the repository**:
 
     ```bash
-    git clone [https://github.com/didarbilgin/Pusula_Didar_Nur_Bilgin.git]
+    git clone https://github.com/didarbilgin/Pusula_Didar_Nur_Bilgin.git
     ```
 
 2. **Create a virtual environment**:
