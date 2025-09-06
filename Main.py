@@ -1,54 +1,83 @@
-from LoadData import LoadData
-from FillMissingData import FillMissingData
-import DataModel as model  
-from Normalization import Normalization
-from DataMapper import DataMapper
-from DataVisualization import DataVisualization
 import os
+from pathlib import Path
+import pandas as pd
 
-class Main:
-    def __init__(self):
-        self.load_data()  
-        self.normalize()  
-        self.fill_data()  
-        self.map()  
-        self.visualize()  
-        self.output()     
+from src.data.load_data import LoadData
+from src.preprocessing.normalization.pipeline import NormalizationPipeline
+from impute.pipeline_impute import run_imputation
+from src.eda.missing_analyzer import MissingAnalyzer
+from src.visualization.data_viz import DataVisualization
+from src.preprocessing.postprocess.convert_numeric import convert_numeric
 
-    # Load the data that has been given
-    def load_data(self):
-        self.data_loader = LoadData()
-        self.data = self.data_loader.load()  
-        self.original_data = self.data.copy() 
-        print("Data loaded successfully.")
-   
-    # Normalize the data
-    def normalize(self):
-        normalizer = Normalization(self.data)
-        self.data = normalizer.normalize()
-        print("Data normalization completed.")
-        
-    # Fill missing data    
-    def fill_data(self):
-        self.data_filler = FillMissingData(self.data)  
-        self.data = self.data_filler.fillMissingData()
-        print("Missing values have been successfully filled.")
+REPORTS_DIR = Path("reports")
+FIG_DIR = REPORTS_DIR / "figures"
+OUT_PATH = Path("data/output.xlsx")
 
-    # Map the updated data to model variables
-    def map(self):
-        DataMapper(self.data) 
-        print("Data mapping completed.")
-            
-    # Create visual graphs from the data
-    def visualize(self):
-        DataVisualization(self.data)
-        print("Visualizations have been created.")
-        
-    # Display the updated data with an Excel file
-    def output(self):
-        output_path = os.path.join(os.getcwd(), 'output.xlsx') 
-        self.data.to_excel(output_path, index=False)         
-        print("Output file has been created.")
-        
+def ensure_dirs():
+    #rapor ve çıktı klasörleri
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+def print_and_save_missing(df: pd.DataFrame, name: str):
+    #eksik özeti
+    rep = MissingAnalyzer(df).summary()
+    #konsola yazdırma
+    print(f"\n== Missing {name} ==")
+    print(rep.head(20))
+    #csv olarak kaydetme
+    rep.to_csv(REPORTS_DIR / f"missing_{name}.csv", index=True)
+
+def main():
+    #klasörleri hazırlama
+    ensure_dirs()
+
+    #veri yükleme
+    df = LoadData(input_path="data/Talent_Academy_Case_DT_2025.xlsx").load()
+    print(f"Data loaded successfully. Shape: {df.shape}")
+
+    #ham veride eksik durumunu yaz/kaydet
+    print_and_save_missing(df, "before")
+
+    #normalizasyon (metin+çoklu değer+sayısal kurallar)
+    text_cols = [
+        "Cinsiyet","Uyruk","KanGrubu",
+        "KronikHastalik","Alerji",
+        "Tanilar","TedaviAdi","UygulamaYerleri","Bolum",
+    ]
+    multivalue_cols = ["UygulamaYerleri", "Alerji", "KronikHastalik"]
+    numeric_rules = {
+        "Yas": (0, 120),
+        "uygulamasuresi_num": (1, 600),
+    }
+    df = NormalizationPipeline(text_cols, multivalue_cols, numeric_rules).run(df)
+    print("Data normalization completed.")
+
+    #impute pipeline uygulama
+    df = run_imputation(df)
+    print("Imputation pipeline has been successfully applied.")
+
+    #metin olan süre kolonlarını sonda sayısala çevir
+    df = convert_numeric(
+        df,
+        col_sessions="TedaviSuresi",
+        col_minutes="UygulamaSuresi",
+        out_sessions="TedaviSuresi_seans",
+        out_minutes="UygulamaSuresi_dakika"
+    )
+    print("Duration columns converted and renamed (TedaviSuresi_seans, UygulamaSuresi_dk)")
+    
+    #eksik verileri doldurma sonrası eksik durumunu yaz/kaydet
+    print_and_save_missing(df, "after")
+
+    #görselleştirme 
+    viz = DataVisualization(df, outdir=str(FIG_DIR))
+    viz.run_requested()
+    print("Visualizations have been created under reports/figures.")
+
+    #çıktıyı kaydet
+    df.to_excel(OUT_PATH, index=False)
+    print(f"Output file has been created at: {OUT_PATH.resolve()}")
+
 if __name__ == "__main__":
-    app = Main()
+    main()
